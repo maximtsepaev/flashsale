@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS orders (
     -- и может хранить только идентификатор продукта. Логика проверки наличия товара будет обрабатываться через gRPC запросы.
     quantity INT NOT NULL CHECK (quantity > 0),
     status VARCHAR(50) NOT NULL DEFAULT 'created',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);

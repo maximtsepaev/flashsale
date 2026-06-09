@@ -5,13 +5,27 @@ services:
     image: postgres:15-alpine
     container_name: flashsale_postgres
     environment:
-      - POSTGRES_USER=flashsale
-      - POSTGRES_PASSWORD=super_seccret_flash_sale_password
-      - POSTGRES_DB=flashsale
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: super_secret_password
+      POSTGRES_DB: flashsale
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile # Мы напишем его позже, когда будем докер учить
+    container_name: flashsale_gateway
+    ports:
+      - "8080:8080"
+    environment:
+      # ВОТ ТУТ МЫ ПЕРЕДАЕМ ПЕРЕМЕННУЮ!
+      - DATABASE_URL=postgres://postgres:super_secret_password@postgres:5432/flashsale?sslmode=disable
+    depends_on:
+      - postgres
     restart: unless-stopped
 
 volumes:
