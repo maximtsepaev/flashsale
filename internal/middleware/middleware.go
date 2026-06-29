@@ -7,13 +7,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-
 	"github.com/maximtsepaev/flashsale/internal/auth"
 )
 
-const UserIDKey string = "userID"
+const UserIDKey = "userID"
 
-// LoggerMiddleware логирует входящие HTTP запросы в формате JSON
 func LoggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -25,11 +23,11 @@ func LoggerMiddleware() gin.HandlerFunc {
 			"path", c.Request.URL.Path,
 			"duration", time.Since(start).String(),
 			"remote_addr", c.Request.RemoteAddr,
+			"status", c.Writer.Status(),
 		)
 	}
 }
 
-// AuthMiddleware проверяет JWT токен и сохраняет UserID в контекст
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.Request.Header.Get("Authorization")

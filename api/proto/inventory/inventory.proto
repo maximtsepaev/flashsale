@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+option go_package = "github.com/maximtsepaev/flashsale/internal/pb/inventory";
+
+service InventoryService {
+    rpc GetStock(GetStockRequest) returns (GetStockResponse);
+
+    rpc ReserveProduct(ReserveRequest) returns (ReserveResponse);
+}
+
+message GetStockRequest {
+    int64 product_id = 1;
+}
+
+message GetStockResponse {
+    int64 quantity = 1;
+}
+
+message ReserveRequest {
+    int64 product_id = 1;
+    int32 quantity   = 2;
+}
+
+message ReserveResponse {
+    bool success   = 1;
+    string message = 2;
+}

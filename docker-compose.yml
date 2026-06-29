@@ -17,12 +17,11 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile # Мы напишем его позже, когда будем докер учить
+      dockerfile: Dockerfile 
     container_name: flashsale_gateway
     ports:
       - "8080:8080"
     environment:
-      # ВОТ ТУТ МЫ ПЕРЕДАЕМ ПЕРЕМЕННУЮ!
       - DATABASE_URL=postgres://postgres:super_secret_password@postgres:5432/flashsale?sslmode=disable
     depends_on:
       - postgres
