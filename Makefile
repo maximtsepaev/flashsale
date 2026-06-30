@@ -1,12 +1,18 @@
-# Переменные
-DB_URL=postgres://postgres:super_secret_password@localhost:5432/flashsale?sslmode=disable
+DB_URL=postgres://postgres:super_secret_password@host.docker.internal:5432/flashsale?sslmode=disable
+DB_LOCAL=postgres://postgres:super_secret_password@localhost:5432/flashsale?sslmode=disable
 
-.PHONY: migrate-up migrate-down
-
-# Применить миграции
+# Команда для наката миграций
 migrate-up:
-	docker run --rm -v $(CURDIR)/db/migrations:/migrations migrate/migrate -path=/migrations -database "$(DB_URL)" up
+	MSYS_NO_PATHCONV=1 docker run --rm -v "$$(pwd)/db/migrations:/migrations" migrate/migrate -path=/migrations -database "$(DB_URL)" up
 
-# Откатить миграции на 1 шаг назад
+# Команда для отката миграций на 1 шаг назад
 migrate-down:
-	docker run --rm -v $(CURDIR)/db/migrations:/migrations migrate/migrate -path=/migrations -database "$(DB_URL)" down 1
+	MSYS_NO_PATHCONV=1 docker run --rm -v "$$(pwd)/db/migrations:/migrations" migrate/migrate -path=/migrations -database "$(DB_URL)" down 1
+
+# Запуск сервиса остатков
+run-inventory:
+	DATABASE_URL="$(DB_LOCAL)" go run cmd/inventory/main.go
+
+# Запуск шлюза
+run-gateway:
+	DATABASE_URL="$(DB_LOCAL)" go run cmd/gateway/main.go

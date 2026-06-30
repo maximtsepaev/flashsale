@@ -4,14 +4,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/maximtsepaev/flashsale/internal/middleware"
+	pb "github.com/maximtsepaev/flashsale/internal/pb/inventory"
 )
 
 type Handler struct {
-	db *sqlx.DB
+	db              *sqlx.DB
+	inventoryClient pb.InventoryServiceClient
 }
 
-func NewHandler(db *sqlx.DB) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *sqlx.DB, inventoryClient pb.InventoryServiceClient) *Handler {
+	return &Handler{
+		db:              db,
+		inventoryClient: inventoryClient,
+	}
 }
 
 func (h *Handler) InitRoutes() *gin.Engine {
@@ -27,6 +32,5 @@ func (h *Handler) InitRoutes() *gin.Engine {
 	{
 		protected.POST("/orders", h.handleCreateOrder)
 	}
-
 	return r
 }

@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS users (
 -- Таблица остатков товаров (inventory)
 CREATE TABLE IF NOT EXISTS inventory (
     product_id BIGSERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
     quantity INT NOT NULL DEFAULT 0,
     CONSTRAINT quantity_non_negative CHECK (quantity >= 0)
 );
