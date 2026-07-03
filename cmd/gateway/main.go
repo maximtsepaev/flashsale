@@ -10,6 +10,7 @@ import (
 
 	invClient "github.com/maximtsepaev/flashsale/internal/client/inventory"
 	"github.com/maximtsepaev/flashsale/internal/handler"
+	"github.com/maximtsepaev/flashsale/internal/kafka"
 )
 
 func main() {
@@ -37,7 +38,20 @@ func main() {
 	}
 	defer conn.Close()
 
-	h := handler.NewHandler(db, client)
+	kafkaBroker := os.Getenv("KAFKA_BROKER")
+	if kafkaBroker == "" {
+		kafkaBroker = "localhost:9092"
+	}
+
+	orderProducer := kafka.NewProducer(kafkaBroker, "orders")
+	defer func() {
+		if err := orderProducer.Close(); err != nil {
+			slog.Error("Failed to close Kafka producer", "error", err)
+		}
+	}()
+	slog.Info("Successfully initialized Kafka Producer", "broker", kafkaBroker)
+
+	h := handler.NewHandler(db, client, orderProducer)
 	router := h.InitRoutes()
 
 	slog.Info("Gateway HTTP Server starting on :8080")
