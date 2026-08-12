@@ -14,7 +14,7 @@ import (
 // В реальном проекте это должно читаться из config/env
 var jwtSecret = []byte("super_secret_key")
 
-// Claims — структура, которая будет зашита внутрь JWT-токена
+// Cтруктура, которая будет зашита внутрь JWT-токена
 type Claims struct {
 	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
