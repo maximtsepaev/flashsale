@@ -1,5 +1,6 @@
 DB_URL=postgres://postgres:super_secret_password@host.docker.internal:5432/flashsale?sslmode=disable
 DB_LOCAL=postgres://postgres:super_secret_password@localhost:5432/flashsale?sslmode=disable
+KAFKA_LOCAL=localhost:9092
 
 # Команда для наката миграций
 migrate-up:
@@ -15,4 +16,14 @@ run-inventory:
 
 # Запуск шлюза
 run-gateway:
-	DATABASE_URL="$(DB_LOCAL)" go run cmd/gateway/main.go
+	DATABASE_URL="$(DB_LOCAL)" KAFKA_BROKER="$(KAFKA_LOCAL)" go run cmd/gateway/main.go
+
+# Запуск сервиса заказов
+run-order:
+	DATABASE_URL="$(DB_LOCAL)" KAFKA_BROKER="$(KAFKA_LOCAL)" go run cmd/order/main.go
+
+# Выполнение sql команд в контейнере PostgreSQL
+psql:
+	docker exec -it flashsale_postgres psql -U postgres -d flashsale
+# Использование: В терминале написать make psql, открывается приглашение flashsale=#, вводишь запросы. 
+# Для выхода Ctrl+D или \q. 
