@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -27,7 +29,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to DB via sqlx: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("Failed to close DB connection", "error", err)
+		}
+	}()
 
 	slog.Info("Inventory Service connected to PostgreSQL")
 
@@ -37,14 +43,21 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-
 	inventoryServer := inventory.NewServer(db)
-
 	pb.RegisterInventoryServiceServer(grpcServer, inventoryServer)
 
-	slog.Info("Inventory gRPC Server starting on :50051")
+	go func() {
+		slog.Info("Inventory gRPC Server starting on :50051")
+		if err := grpcServer.Serve(lis); err != nil {
+			slog.Error("Inventory gRPC server stopped", "error", err)
+		}
+	}()
 
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve gRPC: %v", err)
-	}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("Shutting down Inventory gRPC Server gracefully...")
+	grpcServer.GracefulStop()
+	slog.Info("Inventory Service exited cleanly")
 }

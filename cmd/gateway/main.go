@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -25,7 +31,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("Failed to close DB connection", "error", err)
+		}
+	}()
 
 	grpcTarget := os.Getenv("INVENTORY_GRPC_URL")
 	if grpcTarget == "" {
@@ -54,8 +64,29 @@ func main() {
 	h := handler.NewHandler(db, client, orderProducer)
 	router := h.InitRoutes()
 
-	slog.Info("Gateway HTTP Server starting on :8080")
-	if err := router.Run(":8080"); err != nil {
-		slog.Error("Server failed to start", "error", err)
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: router,
 	}
+
+	go func() {
+		slog.Info("Gateway HTTP Server starting on :8080")
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("Gateway HTTP server failed", "error", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("Shutting down Gateway HTTP Server gracefully...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("Gateway forced to shutdown", "error", err)
+	}
+
+	slog.Info("Gateway exited cleanly")
 }

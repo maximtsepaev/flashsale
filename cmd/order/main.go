@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/jmoiron/sqlx"
@@ -32,7 +35,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("Failed to close DB connection", "error", err)
+		}
+	}()
 	slog.Info("Order Service connected to PostgreSQL")
 
 	kafkaBroker := os.Getenv("KAFKA_BROKER")
@@ -47,19 +54,27 @@ func main() {
 		MinBytes: 10e3,
 		MaxBytes: 10e6,
 	})
-	defer reader.Close()
 	slog.Info("Order Service Kafka Reader started", "broker", kafkaBroker)
 
-	// Graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	go func() {
+		defer wg.Done()
+		slog.Info("Order Service is running and waiting for messages...")
+
 		for {
-			msg, err := reader.ReadMessage(context.Background())
+			msg, err := reader.ReadMessage(ctx)
 			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+					slog.Info("Kafka consumer loop stopped")
+					return
+				}
 				slog.Error("Failed to read message from Kafka", "error", err)
-				break
+				return
 			}
 
 			var orderMsg OrderMessage
@@ -85,7 +100,13 @@ func main() {
 		}
 	}()
 
-	slog.Info("Order Service is running and waiting for messages...")
 	<-ctx.Done()
-	slog.Info("Order Service gracefully shutting down")
+	slog.Info("Order Service gracefully shutting down...")
+
+	if err := reader.Close(); err != nil {
+		slog.Error("Failed to close Kafka reader", "error", err)
+	}
+
+	wg.Wait()
+	slog.Info("Order Service exited cleanly")
 }
