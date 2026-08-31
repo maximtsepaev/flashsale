@@ -26,12 +26,9 @@ func (h *Handler) handleRegister(c *gin.Context) {
 		return
 	}
 
-	var id int64
-	query := "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id"
-
-	err = h.db.QueryRowx(query, req.Email, hash).Scan(&id)
+	id, err := h.userStore.CreateUser(c.Request.Context(), req.Email, hash)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "user already exists or DB error"})
+		c.JSON(http.StatusConflict, gin.H{"error": "user already exists or database error"})
 		return
 	}
 
@@ -48,26 +45,20 @@ func (h *Handler) handleLogin(c *gin.Context) {
 		return
 	}
 
-	var id int64
-	var hash string
-	query := "SELECT id, password_hash FROM users WHERE email = $1"
-
-	err := h.db.QueryRowx(query, req.Email).Scan(&id, &hash)
+	user, err := h.userStore.GetByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 		return
 	}
 
-	if !auth.CheckPasswordHash(req.Password, hash) {
+	if !auth.CheckPasswordHash(req.Password, user.PasswordHash) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 		return
 	}
-
-	token, err := auth.GenerateToken(id)
+	token, err := auth.GenerateToken(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }

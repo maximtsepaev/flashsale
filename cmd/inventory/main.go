@@ -14,6 +14,7 @@ import (
 
 	pb "github.com/maximtsepaev/flashsale/internal/pb/inventory"
 	"github.com/maximtsepaev/flashsale/internal/services/inventory"
+	"github.com/maximtsepaev/flashsale/internal/store"
 )
 
 func main() {
@@ -43,7 +44,8 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	inventoryServer := inventory.NewServer(db)
+	invStore := store.NewInventoryStore(db)
+	inventoryServer := inventory.NewServer(invStore)
 	pb.RegisterInventoryServiceServer(grpcServer, inventoryServer)
 
 	go func() {

@@ -17,6 +17,7 @@ import (
 	invClient "github.com/maximtsepaev/flashsale/internal/client/inventory"
 	"github.com/maximtsepaev/flashsale/internal/handler"
 	"github.com/maximtsepaev/flashsale/internal/kafka"
+	"github.com/maximtsepaev/flashsale/internal/store"
 )
 
 func main() {
@@ -61,7 +62,8 @@ func main() {
 	}()
 	slog.Info("Successfully initialized Kafka Producer", "broker", kafkaBroker)
 
-	h := handler.NewHandler(db, client, orderProducer)
+	userStore := store.NewUserStore(db)
+	h := handler.NewHandler(userStore, client, orderProducer)
 	router := h.InitRoutes()
 
 	srv := &http.Server{

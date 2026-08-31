@@ -27,3 +27,10 @@ psql:
 	docker exec -it flashsale_postgres psql -U postgres -d flashsale
 # Использование: В терминале написать make psql, открывается приглашение flashsale=#, вводишь запросы. 
 # Для выхода Ctrl+D или \q. 
+
+# Проверка кода на форматирование, ошибки и тесты
+check:
+    go fmt ./...
+    go vet ./...
+    golangci-lint run
+    go test ./...

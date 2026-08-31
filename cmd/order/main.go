@@ -14,6 +14,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	"github.com/maximtsepaev/flashsale/internal/store"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -35,6 +36,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
+	orderStore := store.NewOrderStore(db)
 	defer func() {
 		if err := db.Close(); err != nil {
 			slog.Error("Failed to close DB connection", "error", err)
@@ -89,8 +91,7 @@ func main() {
 				"quantity", orderMsg.Quantity,
 			)
 
-			query := `INSERT INTO orders (user_id, product_id, quantity, status) VALUES ($1, $2, $3, $4)`
-			_, err = db.Exec(query, orderMsg.UserID, orderMsg.ProductID, orderMsg.Quantity, "created")
+			err = orderStore.CreateOrder(ctx, orderMsg.UserID, orderMsg.ProductID, orderMsg.Quantity, "created")
 			if err != nil {
 				slog.Error("Failed to insert order into database", "error", err)
 				continue

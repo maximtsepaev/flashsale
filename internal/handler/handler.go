@@ -2,21 +2,21 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/jmoiron/sqlx"
 	"github.com/maximtsepaev/flashsale/internal/kafka"
 	"github.com/maximtsepaev/flashsale/internal/middleware"
 	pb "github.com/maximtsepaev/flashsale/internal/pb/inventory"
+	"github.com/maximtsepaev/flashsale/internal/store"
 )
 
 type Handler struct {
-	db              *sqlx.DB
+	userStore       *store.UserStore // <-- заменили db на userStore
 	inventoryClient pb.InventoryServiceClient
 	kafkaProducer   *kafka.Producer
 }
 
-func NewHandler(db *sqlx.DB, inventoryClient pb.InventoryServiceClient, kafkaProducer *kafka.Producer) *Handler {
+func NewHandler(userStore *store.UserStore, inventoryClient pb.InventoryServiceClient, kafkaProducer *kafka.Producer) *Handler {
 	return &Handler{
-		db:              db,
+		userStore:       userStore,
 		inventoryClient: inventoryClient,
 		kafkaProducer:   kafkaProducer,
 	}

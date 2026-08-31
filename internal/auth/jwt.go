@@ -20,8 +20,6 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-const saltLength = 16
-
 // HashPassword принимает чистый пароль, делает соль и возвращает строку формата "соль:хэш"
 func HashPassword(password string) (string, error) {
 	saltBytes := make([]byte, 16)
@@ -55,11 +53,7 @@ func CheckPasswordHash(password, encodedHash string) bool {
 	newHashBytes := sha256.Sum256(secretData)
 	newHashStr := fmt.Sprintf("%x", newHashBytes)
 
-	if newHashStr == hashStr {
-		return true
-	}
-
-	return false
+	return newHashStr == hashStr
 }
 
 // GenerateToken создает JWT-токен для пользователя на 24 часа
