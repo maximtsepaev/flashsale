@@ -2,13 +2,13 @@
 
 FlashSale - это высоконагруженная микросервисная платформа для проведения мгновенных распродаж (flash sales). Архитектура проекта спроектирована с учетом требований к высокой пропускной способности, устойчивости к пиковым нагрузкам, защите от состояния гонки (race conditions) и гарантированному исключению повторной продажи дефицитного товара (overselling).
 
-Проект написан на языке Go с использованием чистой слоистой архитектуры и паттерна Repository (Store). Система реализует ключевые паттерны распределенных систем: синхронное взаимодействие сервисов по протоколу gRPC, асинхронную буферизацию заказов через брокер сообщений Apache Kafka, изолированный слой доступа к данным, атомарное резервирование на уровне СУБД PostgreSQL и авторизацию пользователей по стандарту JWT.
+Проект написан на языке Go (1.25) с использованием чистой слоистой архитектуры и паттерна Repository (Store). Система реализует ключевые паттерны распределенных систем: синхронное взаимодействие сервисов по протоколу gRPC, асинхронную буферизацию заказов через брокер сообщений Apache Kafka, изолированный слой доступа к данным, атомарное резервирование на уровне СУБД PostgreSQL, авторизацию пользователей по стандарту JWT и полную контейнеризацию в Docker Compose.
 
 ---
 
 ## Архитектура системы
 
-В моменты проведения распродаж на систему обрушивается шквал одновременных запросов. Классическая монолитная архитектура с синхронной записью в базу данных быстро упирается в блокировки строк и исчерпание пула соединений.
+В моменты проведения распродаж на систему обрушивается пиковый поток одновременных запросов. Классическая монолитная архитектура с синхронной записью в базу данных быстро упирается в блокировки строк и исчерпание пула соединений.
 
 Для решения этой проблемы в FlashSale применен гибридный подход:
 
@@ -20,7 +20,7 @@ FlashSale - это высоконагруженная микросервисна
 ```text
 [ HTTP Клиент / Фронтенд ]
             |
-            | HTTP (JSON / JWT)
+            | HTTP (JSON / JWT) :8080
             v
 +-------------------------------------------------------+
 |                    Gateway Service                    |
@@ -29,7 +29,7 @@ FlashSale - это высоконагруженная микросервисна
 |  - UserStore (слой работы с пользователями)           |
 +-------------------------------------------------------+
        |                                     |
-       | gRPC (Синхронно)                    | Kafka (Асинхронно)
+       | gRPC (Синхронно) :50051             | Kafka (Асинхронно) :9092
        | ReserveProduct()                    | Topic: "orders"
        v                                     v
 +---------------------------+       +---------------------------+
@@ -55,9 +55,11 @@ FlashSale - это высоконагруженная микросервисна
 Проект разделен на три независимых сервиса и общий слой данных:
 
 ### 1. API Gateway (`cmd/gateway`)
-Входная точка для внешних клиентов.
+Входная точка для внешних клиентов:
 - Реализован на HTTP-фреймворке Gin.
+- Порт конфигурируется через переменную окружения `HTTP_PORT` (по умолчанию `:8080`).
 - Обеспечивает регистрацию и вход пользователей с выдачей JWT-токенов.
+- Секретный ключ подписи JWT считывается из переменной окружения `JWT_SECRET`.
 - Хэширование паролей выполнено с использованием криптографической соли и алгоритма SHA-256.
 - Содержит промежуточные обработчики (middleware) для структурированного логирования (`slog`) и проверки токенов (`AuthMiddleware`).
 - Использует `store.UserStore` для работы с учетными записями пользователей.
@@ -66,7 +68,8 @@ FlashSale - это высоконагруженная микросервисна
 - Поддерживает Graceful Shutdown для корректного завершения активных соединений при остановке.
 
 ### 2. Inventory Service (`cmd/inventory`)
-Высокопроизводительный внутренний сервис учета и резервирования складских остатков.
+Высокопроизводительный внутренний сервис учета и резервирования складских остатков:
+- Порт gRPC настраивается через переменную `GRPC_PORT` (по умолчанию `:50051`).
 - Предоставляет контракт gRPC, описанный в Protobuf (`api/proto/inventory/inventory.proto`).
 - Метод `GetStock`: получение текущего доступного количества товара по его `product_id`.
 - Метод `ReserveProduct`: делегирует выполнение атомарного списания в `store.InventoryStore`.
@@ -77,10 +80,9 @@ FlashSale - это высоконагруженная микросервисна
   WHERE product_id = $2 AND quantity >= $1;
   ```
   Благодаря условию `quantity >= $1` и механизму блокировки строк в PostgreSQL исключаются гонки данных при параллельных запросах и предотвращается отрицательный остаток.
-- Слушает внутренний порт TCP `:50051`.
 
 ### 3. Order Service (`cmd/order`)
-Асинхронный воркер обработки заказов.
+Асинхронный воркер обработки заказов:
 - Подключается к Apache Kafka в качестве консьюмера (группа `order-processors`, топик `orders`).
 - Непрерывно вычитывает события об успешно зарезервированных товарах.
 - Выполняет запись информации о заказе через `store.OrderStore` со статусом `created`.
@@ -97,59 +99,17 @@ FlashSale - это высоконагруженная микросервисна
 
 ## Стек технологий
 
-- **Язык разработки**: Go (1.25+)
+- **Язык разработки**: Go 1.25
 - **HTTP фреймворк**: Gin (`github.com/gin-gonic/gin`)
 - **Межсервисное взаимодействие**: gRPC (`google.golang.org/grpc`), Protocol Buffers v3
 - **Брокер сообщений**: Apache Kafka (`github.com/segmentio/kafka-go`) в режиме KRaft
 - **СУБД**: PostgreSQL 15
 - **Работа с базой данных**: `sqlx` (`github.com/jmoiron/sqlx`), драйвер `pq`
-- **Миграции БД**: `golang-migrate`
+- **Миграции БД**: `golang-migrate` (через Docker-контейнер)
 - **Аутентификация**: JWT (JSON Web Tokens) по стандарту HMAC-SHA256 (`github.com/golang-jwt/jwt/v5`)
 - **Логирование**: Стандартный пакет `log/slog` с форматированием в JSON
-- **Контейнеризация**: Docker, Docker Compose
+- **Контейнеризация**: Docker, Docker Compose (Multi-stage сборка образов на базе `golang:1.25-alpine` и `alpine:latest`)
 - **Инструменты контроля качества**: `go fmt`, `go vet`, `golangci-lint`, `go test`
-
----
-
-## Структура базы данных
-
-Схема базы данных инициализируется через миграцию `db/migrations/000001_init_schema.up.sql`.
-
-### Таблица `users`
-Хранит учетные данные пользователей.
-```sql
-CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-```
-
-### Таблица `inventory`
-Хранит доступные остатки товаров на складе. Ограничение `CHECK (quantity >= 0)` гарантирует физическую целостность на уровне СУБД.
-```sql
-CREATE TABLE IF NOT EXISTS inventory (
-    product_id BIGSERIAL PRIMARY KEY,
-    quantity INT NOT NULL DEFAULT 0,
-    CONSTRAINT quantity_non_negative CHECK (quantity >= 0)
-);
-```
-
-### Таблица `orders`
-Хранит сформированные заказы.
-```sql
-CREATE TABLE IF NOT EXISTS orders (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    product_id BIGINT NOT NULL,
-    quantity INT NOT NULL CHECK (quantity > 0),
-    status VARCHAR(50) NOT NULL DEFAULT 'created',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
-```
 
 ---
 
@@ -163,10 +123,13 @@ flashsale/
 │           └── inventory.proto       # Protobuf-определение сервиса остатков
 ├── cmd/
 │   ├── gateway/
+│   │   ├── Dockerfile                # Multi-stage Dockerfile для API Gateway
 │   │   └── main.go                   # Точка входа в API Gateway
 │   ├── inventory/
+│   │   ├── Dockerfile                # Multi-stage Dockerfile для Inventory Service
 │   │   └── main.go                   # Точка входа в gRPC Inventory Service
 │   └── order/
+│       ├── Dockerfile                # Multi-stage Dockerfile для Order Service
 │       └── main.go                   # Точка входа в Order Consumer Service
 ├── db/
 │   └── migrations/
@@ -174,7 +137,7 @@ flashsale/
 │       └── 000001_init_schema.down.sql # Откат схемы БД
 ├── internal/
 │   ├── auth/
-│   │   └── jwt.go                    # Генерация токенов, хэширование паролей
+│   │   └── jwt.go                    # Генерация токенов, валидация, хэширование паролей
 │   ├── client/
 │   │   └── inventory/
 │   │       └── client.go             # Инициализация gRPC клиента к Inventory
@@ -197,46 +160,69 @@ flashsale/
 │       ├── inventory.go              # Слой работы с остатками в БД (InventoryStore)
 │       ├── order.go                  # Слой работы с заказами в БД (OrderStore)
 │       └── user.go                   # Слой работы с пользователями в БД (UserStore)
-├── docker-compose.yml                # Инфраструктура (PostgreSQL, Kafka)
-├── Makefile                          # Команды сборки, миграций, проверок и запуска
-├── go.mod                            # Зависимости Go
+├── .env.example                      # Шаблон конфигурации переменных окружения
+├── .env                              # Локальный файл конфигурации (в .gitignore)
+├── .gitignore                        # Исключения для Git
+├── docker-compose.yml                # Запуск всех сервисов (PostgreSQL, Kafka, Services)
+├── Makefile                          # Команды сборки, запуска, миграций и проверок
+├── go.mod                            # Зависимости Go (Go 1.25.5)
 └── go.sum
 ```
 
 ---
 
-## Переменные окружения
+## Переменные окружения (`.env`)
 
-Каждый сервис конфигурируется с помощью переменных окружения со следующими значениями по умолчанию:
+Все параметры проекта настраиваются через файл `.env`. Для быстрого старта скопируйте шаблон:
 
-| Переменная | Сервис | Значение по умолчанию | Описание |
-| :--- | :--- | :--- | :--- |
-| `DATABASE_URL` | Все сервисы | Обязательная | DSN строка подключения к базе данных PostgreSQL |
-| `INVENTORY_GRPC_URL` | Gateway | `localhost:50051` | Адрес gRPC-сервера сервиса остатков |
-| `KAFKA_BROKER` | Gateway, Order | `localhost:9092` | Адрес брокера Apache Kafka |
-
-Пример строки подключения к БД:
-```text
-postgres://postgres:super_secret_password@localhost:5432/flashsale?sslmode=disable
+```bash
+cp .env.example .env
 ```
+
+| Переменная | Сервисы | Значение по умолчанию | Описание |
+| :--- | :--- | :--- | :--- |
+| `POSTGRES_USER` | PostgreSQL, Compose | `postgres` | Пользователь базы данных |
+| `POSTGRES_PASSWORD`| PostgreSQL, Compose | `super_secret_password` | Пароль базы данных |
+| `POSTGRES_DB` | PostgreSQL, Compose | `flashsale` | Название базы данных |
+| `POSTGRES_PORT` | PostgreSQL, Compose | `5432` | Внешний порт PostgreSQL |
+| `DATABASE_URL` | Все сервисы | Обязательная | DSN строка подключения к PostgreSQL |
+| `KAFKA_PORT` | Kafka, Compose | `9092` | Внешний порт Kafka для хоста |
+| `KAFKA_BROKER` | Gateway, Order | `localhost:9092` / `kafka:29092` | Адрес брокера Apache Kafka |
+| `HTTP_PORT` | Gateway | `8080` | Порт HTTP сервера API Gateway |
+| `JWT_SECRET` | Gateway (Auth) | Обязательная | Секретный ключ подписи JWT-токенов |
+| `GRPC_PORT` | Inventory | `50051` | Порт gRPC сервера сервиса остатков |
+| `INVENTORY_GRPC_URL`| Gateway | `localhost:50051` / `inventory:50051` | Адрес gRPC сервиса остатков |
 
 ---
 
 ## Быстрый старт и запуск
 
 ### Требования к окружению
-- Установленный **Go** версии 1.25 или новее
+- Установленный **Go** версии 1.25+ (для локального запуска вне Docker)
 - Установленный **Docker** и **Docker Compose**
-- Утилита **Make** (для выполнения команд Makefile)
-- Утилита `golang-migrate` (опционально, накатывать миграции можно через Docker-контейнер)
+- Утилита **Make**
 
 ---
 
-### Шаг 1. Запуск инфраструктуры
-Запустите контейнеры с базой данных PostgreSQL и брокером Kafka:
+### Вариант 1. Запуск всего проекта в Docker Compose (Рекомендуемый)
+
+Запуск всех сервисов (`postgres`, `kafka`, `inventory`, `gateway`, `order`) в один клик:
 
 ```bash
-docker compose up -d postgres kafka
+# 1. Запустить все контейнеры со сборкой
+make up
+
+# 2. Накатить миграции базы данных
+make migrate-up
+
+# 3. Добавить тестовый товар на склад
+make psql
+# В консоли Postgres выполнить:
+# INSERT INTO inventory (product_id, quantity) VALUES (1, 50);
+# \q для выхода
+
+# 4. Просмотр логов в реальном времени
+make logs
 ```
 
 Проверить статус запущенных контейнеров:
@@ -244,82 +230,107 @@ docker compose up -d postgres kafka
 docker compose ps
 ```
 
+Остановить все сервисы:
+```bash
+make down
+```
+
 ---
 
-### Шаг 2. Применение миграций базы данных
-Для создания таблиц и индексов выполните команду:
+### Вариант 2. Локальная разработка и отладка
 
+Используется, когда нужно быстро писать код и отлаживать сервисы в IDE без пересборки Docker-образов:
+
+**Шаг 1. Запуск только базы данных и Kafka в Docker:**
+```bash
+docker compose up -d postgres kafka
+```
+
+**Шаг 2. Применение миграций БД:**
 ```bash
 make migrate-up
 ```
 
-Если утилита `make` не установлена, выполните накатывание миграций через Docker напрямую:
-```bash
-docker run --rm -v "$(pwd)/db/migrations:/migrations" --network host migrate/migrate -path=/migrations -database "postgres://postgres:super_secret_password@localhost:5432/flashsale?sslmode=disable" up
-```
-
-Для отката последней миграции доступна команда:
-```bash
-make migrate-down
-```
-
----
-
-### Шаг 3. Наполнение тестовыми данными (Складские остатки)
-Перед оформлением заказов необходимо добавить хотя бы один товар в таблицу `inventory`.
-
-Подключитесь к PostgreSQL:
+**Шаг 3. Добавление тестового товара:**
 ```bash
 make psql
-```
-Или напрямую через docker:
-```bash
-docker exec -it flashsale_postgres psql -U postgres -d flashsale
+# INSERT INTO inventory (product_id, quantity) VALUES (1, 50);
+# \q
 ```
 
-В консоли базы данных добавьте тестовый товар (например, товар с `product_id = 1` и остатком 50 штук):
+**Шаг 4. Запуск сервисов в трех отдельных терминалах:**
+
+* **Терминал 1 (Inventory Service - gRPC :50051):**
+  ```bash
+  make run-inventory
+  ```
+* **Терминал 2 (Order Service - Kafka Consumer):**
+  ```bash
+  make run-order
+  ```
+* **Терминал 3 (API Gateway - HTTP :8080):**
+  ```bash
+  make run-gateway
+  ```
+
+---
+
+## Справочник команд Makefile
+
+| Команда | Описание |
+| :--- | :--- |
+| `make up` | Собрать образы и запустить все 5 сервисов в Docker |
+| `make down` | Остановить и удалить все контейнеры проекта |
+| `make restart` | Полный перезапуск контейнеров (`down` + `up`) |
+| `make logs` | Просмотр объединенных логов всех сервисов в реальном времени |
+| `make build` | Сборка Docker-образов без запуска |
+| `make migrate-up` | Применение всех миграций схемы базы данных |
+| `make migrate-down` | Откат последней миграции базы данных на 1 шаг назад |
+| `make psql` | Интерактивное подключение к PostgreSQL через консоль `psql` |
+| `make run-inventory` | Локальный запуск сервиса остатков на хосте (`:50051`) |
+| `make run-gateway` | Локальный запуск шлюза на хосте (`:8080`) |
+| `make run-order` | Локальный запуск сервиса заказов на хосте |
+| `make check` | Запуск форматирования (`go fmt`), анализатора (`go vet`), линтера (`golangci-lint`) и тестов |
+| `make proto` | Генерация Go-кода Protobuf и gRPC из файла `inventory.proto` |
+
+---
+
+## Структура базы данных
+
+Схема базы данных инициализируется через миграцию `db/migrations/000001_init_schema.up.sql`.
+
+### Таблица `users`
 ```sql
-INSERT INTO inventory (product_id, quantity) VALUES (1, 50);
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 ```
-Для выхода из psql введите `\q`.
 
----
-
-### Шаг 4. Запуск сервисов приложения
-
-Для полноценной работы системы откройте три отдельных терминала и запустите сервисы:
-
-**Терминал 1: Сервис остатков (Inventory Service)**
-```bash
-make run-inventory
+### Таблица `inventory`
+```sql
+CREATE TABLE IF NOT EXISTS inventory (
+    product_id BIGSERIAL PRIMARY KEY,
+    quantity INT NOT NULL DEFAULT 0,
+    CONSTRAINT quantity_non_negative CHECK (quantity >= 0)
+);
 ```
-*Сервис запускает gRPC сервер на порту `:50051`, инициализирует `InventoryStore` и подключается к PostgreSQL.*
 
-**Терминал 2: Сервис обработки заказов (Order Service)**
-```bash
-make run-order
+### Таблица `orders`
+```sql
+CREATE TABLE IF NOT EXISTS orders (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id BIGINT NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    status VARCHAR(50) NOT NULL DEFAULT 'created',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 ```
-*Сервис запускает Kafka Reader, инициализирует `OrderStore`, подписывается на топик `orders` и ожидает поступления сообщений.*
-
-**Терминал 3: API Gateway**
-```bash
-make run-gateway
-```
-*Шлюз инициализирует `UserStore`, `InventoryServiceClient`, `OrderProducer` и поднимает HTTP сервер на порту `:8080`.*
-
----
-
-### Шаг 5. Проверка качества кода и тестов
-Для автоматического форматирования, статического анализа и запуска тестов выполните:
-
-```bash
-make check
-```
-Команда последовательно выполняет:
-1. `go fmt ./...` - форматирование исходного кода.
-2. `go vet ./...` - поиск подозрительных конструкций.
-3. `golangci-lint run` - запуск комплексного линтера.
-4. `go test ./...` - запуск модульных и интеграционных тестов.
 
 ---
 
@@ -328,7 +339,7 @@ make check
 Базовый URL шлюза: `http://localhost:8080`
 
 ### 1. Регистрация пользователя
-Создает нового пользователя в системе через `UserStore`.
+Создает нового пользователя в системе.
 
 - **URL**: `/register`
 - **Метод**: `POST`
@@ -363,7 +374,7 @@ curl -X POST http://localhost:8080/register \
 ---
 
 ### 2. Аутентификация (Вход)
-Проверяет учетные данные через `UserStore` и возвращает JWT токен.
+Проверяет учетные данные и возвращает JWT токен.
 
 - **URL**: `/login`
 - **Метод**: `POST`
@@ -397,7 +408,7 @@ curl -X POST http://localhost:8080/login \
 ---
 
 ### 3. Оформление заказа (Flash Sale Order)
-Атомарно списывает товар со склада через `InventoryStore` и отправляет заказ в очередь на асинхронное сохранение.
+Атомарно списывает товар со склада через `InventoryService` и отправляет заказ в Kafka для асинхронного сохранения в БД.
 
 - **URL**: `/orders`
 - **Метод**: `POST`
@@ -428,37 +439,36 @@ curl -X POST http://localhost:8080/orders \
 ```
 
 - **Ошибки**:
-  - `401 Unauthorized` - отсутствует или невалиден заголовок `Authorization`.
-  - `400 Bad Request` - недостаточно остатка на складе (`"error": "Failed to reserve product", "message": "Not enough stock"`).
-  - `500 Internal Server Error` - ошибка взаимодействия с gRPC-сервисом или Kafka.
+  - `401 Unauthorized` — отсутствует или невалиден заголовок `Authorization`.
+  - `400 Bad Request` — недостаточно товара на складе (`"message": "Not enough stock"`).
+  - `500 Internal Server Error` — инфраструктурная ошибка связи с gRPC или Kafka.
 
 ---
 
 ## Проверка сценариев работы
 
 ### Сценарий 1: Успешная покупка
-1. Добавьте в базу товар с остатком 5 штук.
-2. Авторизуйтесь и отправьте заказ на 3 единицы товара.
-3. Ответ: HTTP 201 Created.
-4. Проверьте логи в терминале Order Service: появится запись о вычитке сообщения из Kafka и сохранении в БД через `OrderStore`.
-5. Проверьте остаток в таблице `inventory`: он уменьшился до 2.
-6. Проверьте таблицу `orders`: появилась новая запись с `user_id`, `product_id = 1`, `quantity = 3`, `status = 'created'`.
+1. Добавьте в базу товар с остатком 5 штук (`INSERT INTO inventory (product_id, quantity) VALUES (1, 5);`).
+2. Авторизуйтесь через `/login` и получите JWT-токен.
+3. Отправьте запрос на покупку 3 единиц товара через `POST /orders`.
+4. Ответ: `HTTP 201 Created`.
+5. Проверьте логи сервиса заказов: `make logs` покажет вычитку сообщения из Kafka и сохранение в PostgreSQL.
+6. Проверьте остаток в таблице `inventory`: он уменьшился до 2.
+7. Проверьте таблицу `orders`: появилась запись со статусом `created`.
 
 ### Сценарий 2: Недостаточно товара (Защита от overselling)
 1. При текущем остатке 2 единицы отправьте запрос на покупку 5 единиц.
-2. Ответ: HTTP 400 Bad Request с сообщением `"Not enough stock"`.
+2. Ответ: `HTTP 400 Bad Request` с сообщением `"Not enough stock"`.
 3. Сообщение в Kafka не отправляется, лишней нагрузки на базу данных заказов не создается, остаток товара в таблице `inventory` не изменился.
 
 ---
 
 ## Генерация Protobuf (При изменении контракта)
 
-В случае изменения файла `api/proto/inventory/inventory.proto` выполните генерацию Go-кода с помощью компилятора `protoc`:
+При изменении файла `api/proto/inventory/inventory.proto` запустите команду:
 
 ```bash
-protoc --go_out=. --go_opt=paths=source_relative \
-       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-       internal/pb/inventory/inventory.proto
+make proto
 ```
 
 Требуются установленные плагины:
@@ -475,3 +485,4 @@ protoc --go_out=. --go_opt=paths=source_relative \
 - **Паттерн Saga / Компенсирующие транзакции**: автоматический возврат зарезервированного товара при сбое оплаты или отмене заказа.
 - **Метрики и трассировка**: подключение Prometheus для сбора метрик (RPS, latency, ошибки gRPC) и OpenTelemetry/Jaeger для распределенной трассировки запросов.
 - **Rate Limiting**: ограничение частоты запросов от одного IP / UserID для защиты от ботов на шлюзе.
+

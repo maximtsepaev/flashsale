@@ -37,6 +37,7 @@ func main() {
 			slog.Error("Failed to close DB connection", "error", err)
 		}
 	}()
+	slog.Info("Gateway connected to PostgreSQL")
 
 	grpcTarget := os.Getenv("INVENTORY_GRPC_URL")
 	if grpcTarget == "" {
@@ -48,6 +49,7 @@ func main() {
 		log.Fatalf("Failed to create inventory gRPC client: %v", err)
 	}
 	defer conn.Close()
+	slog.Info("Connected to Inventory gRPC service", "target", grpcTarget)
 
 	kafkaBroker := os.Getenv("KAFKA_BROKER")
 	if kafkaBroker == "" {
@@ -66,13 +68,18 @@ func main() {
 	h := handler.NewHandler(userStore, client, orderProducer)
 	router := h.InitRoutes()
 
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = "8080"
+	}
+
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + httpPort,
 		Handler: router,
 	}
 
 	go func() {
-		slog.Info("Gateway HTTP Server starting on :8080")
+		slog.Info("Gateway HTTP Server starting", "port", httpPort)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("Gateway HTTP server failed", "error", err)
 		}

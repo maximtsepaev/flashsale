@@ -38,10 +38,17 @@ func main() {
 
 	slog.Info("Inventory Service connected to PostgreSQL")
 
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		log.Fatalf("Failed to listen on port 50051: %v", err)
+	grpcPort := os.Getenv("GRPC_PORT")
+	if grpcPort == "" {
+		grpcPort = "50051"
 	}
+
+	lis, err := net.Listen("tcp", ":"+grpcPort)
+	if err != nil {
+		log.Fatalf("Failed to listen on port %s: %v", grpcPort, err)
+	}
+
+	slog.Info("Inventory gRPC Server starting", "port", grpcPort)
 
 	grpcServer := grpc.NewServer()
 	invStore := store.NewInventoryStore(db)

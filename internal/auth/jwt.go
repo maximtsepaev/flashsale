@@ -5,14 +5,21 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// В реальном проекте это должно читаться из config/env
-var jwtSecret = []byte("super_secret_key")
+// getJWTSecret читает ключ из env, либо берет дефолтный для локальной разработки
+func getJWTSecret() []byte {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return []byte("super_secret_key")
+	}
+	return []byte(secret)
+}
 
 // Cтруктура, которая будет зашита внутрь JWT-токена
 type Claims struct {
@@ -67,14 +74,18 @@ func GenerateToken(userID int64) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(getJWTSecret())
 }
 
 // ValidateToken проверяет строку токена и возвращает UserID, если всё ок
 func ValidateToken(tokenStr string) (int64, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
+		// проверка метода подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return getJWTSecret(), nil
 	})
 
 	if err != nil || !token.Valid {

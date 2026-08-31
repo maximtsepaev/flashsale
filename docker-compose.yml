@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
     container_name: flashsale_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: super_secret_password
-      POSTGRES_DB: flashsale
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -18,7 +16,7 @@ services:
     image: confluentinc/cp-kafka:7.6.0
     container_name: flashsale_kafka
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT:-9092}:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
@@ -34,18 +32,52 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
-      
+    restart: unless-stopped
+
+  inventory:
+    build:
+      context: .
+      dockerfile: cmd/inventory/Dockerfile
+    container_name: flashsale_inventory
+    environment:
+      - GRPC_PORT=${GRPC_PORT:-50051}
+      - DATABASE_URL=${DATABASE_URL}
+    ports:
+      - "${GRPC_PORT:-50051}:${GRPC_PORT:-50051}"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile 
+      dockerfile: cmd/gateway/Dockerfile
     container_name: flashsale_gateway
-    ports:
-      - "8080:8080"
     environment:
-      - DATABASE_URL=postgres://postgres:super_secret_password@postgres:5432/flashsale?sslmode=disable
+      - HTTP_PORT=${HTTP_PORT:-8080}
+      - DATABASE_URL=${DATABASE_URL}
+      - INVENTORY_GRPC_URL=${INVENTORY_GRPC_URL:-inventory:50051}
+      - KAFKA_BROKER=${KAFKA_BROKER:-kafka:29092}
+      - JWT_SECRET=${JWT_SECRET}
+    ports:
+      - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
     depends_on:
       - postgres
+      - kafka
+      - inventory
+    restart: unless-stopped
+
+  order:
+    build:
+      context: .
+      dockerfile: cmd/order/Dockerfile
+    container_name: flashsale_order
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - KAFKA_BROKER=${KAFKA_BROKER:-kafka:29092}
+    depends_on:
+      - postgres
+      - kafka
     restart: unless-stopped
 
 volumes:

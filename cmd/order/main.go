@@ -57,7 +57,6 @@ func main() {
 		MaxBytes: 10e6,
 	})
 	slog.Info("Order Service Kafka Reader started", "broker", kafkaBroker)
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
