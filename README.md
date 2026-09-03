@@ -17,7 +17,7 @@ FlashSale - это высоконагруженная микросервисна
 3. **Фоновая консистентность (Eventual Consistency)**: Фоновый сервис заказов вычитывает сообщения из Kafka с контролируемой скоростью и фиксирует заказы в базе данных через специализированный слой хранилища.
 4. **Слой доступа к данным (Store / Repository)**: Вся логика взаимодействия с PostgreSQL вынесена в изолированные структуры хранилищ (`UserStore`, `InventoryStore`, `OrderStore`) с обязательной сквозной передачей контекста (`context.Context`).
 
-<img width="1040" height="961" alt="My First Board" src="https://github.com/user-attachments/assets/c7646e6e-e2b2-45ae-947d-d602bfb5b08d" />
+<img width="1040" height="960" alt="My First Board (1)" src="https://github.com/user-attachments/assets/2b63702f-1637-45ae-b52c-b5ac29ef95c2" />
 
 ---
 
